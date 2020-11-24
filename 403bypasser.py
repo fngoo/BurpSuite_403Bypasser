@@ -32,6 +32,8 @@ class BurpExtender(IBurpExtender, IScannerCheck):
         #response = self._helpers.bytesToString(response)
         if sttcode == 403:
             return True
+        elif sttcode == 401:
+            return True
         return False
 
     def doPassiveScan(self, baseRequestResponse):
